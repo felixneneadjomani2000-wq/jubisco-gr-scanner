@@ -1,0 +1,227 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JUBISCO QR Scanner</title>
+
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #f4f6f9;
+      color: #202124;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      max-width: 480px;
+      margin: 20px auto;
+      padding: 24px;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 18px #00000012;
+    }
+
+    h1 {
+      margin: 0;
+      color: #1a237e;
+      text-align: center;
+      font-size: 25px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin: 10px 0 22px;
+    }
+
+    #reader {
+      width: 100%;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 12px;
+      border: 0;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #startBtn {
+      background: #1a237e;
+      color: white;
+    }
+
+    #stopBtn {
+      background: #e8eaf6;
+      color: #1a237e;
+    }
+
+    #status {
+      margin-top: 18px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #f4f6f9;
+      text-align: center;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
+    }
+
+    .note {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.5;
+      margin-top: 18px;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="container">
+    <h1>JUBISCO QR Scanner</h1>
+    <p class="subtitle">Student & Staff Attendance</p>
+
+    <div id="reader"></div>
+
+    <button id="startBtn" type="button">Start Camera</button>
+    <button id="stopBtn" type="button">Stop Camera</button>
+
+    <div id="status" role="status" aria-live="polite">
+      Ready. Press Start Camera to begin.
+    </div>
+
+    <p class="note">
+      Allow camera access when your browser asks. Keep the QR code
+      inside the scanning frame. This page reads the code; it does
+      not independently record attendance.
+    </p>
+  </main>
+
+  <script>
+    let scanner = null;
+    let starting = false;
+    let scanned = false;
+
+    const statusBox = document.getElementById("status");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+
+    function setStatus(message) {
+      statusBox.textContent = message;
+    }
+
+    async function stopScanner() {
+      if (!scanner) return;
+
+      try {
+        if (scanner.isScanning) {
+          await scanner.stop();
+        }
+      } catch (error) {
+        console.error("Scanner stop error:", error);
+      }
+
+      try {
+        await scanner.clear();
+      } catch (error) {
+        console.error("Scanner clear error:", error);
+      }
+
+      scanner = null;
+    }
+
+    startBtn.addEventListener("click", async function () {
+      if (starting || (scanner && scanner.isScanning)) return;
+
+      starting = true;
+      scanned = false;
+      startBtn.disabled = true;
+      setStatus("Starting camera. Please allow camera access.");
+
+      try {
+        if (!window.Html5Qrcode) {
+          throw new Error("QR scanner library could not load. Check your internet connection.");
+        }
+
+        scanner = new Html5Qrcode("reader");
+
+        await scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 230, height: 230 }
+          },
+          async function (decodedText) {
+            if (scanned) return;
+            scanned = true;
+
+            const scannedId = decodedText.trim();
+            setStatus("QR code read: " + scannedId);
+
+            try {
+              await stopScanner();
+            } catch (error) {
+              console.error(error);
+            }
+
+            if (window.opener && !window.opener.closed) {
+              window.opener.postMessage(
+                {
+                  type: "JUBISCO_QR_SCANNED",
+                  id: scannedId
+                },
+                "*"
+              );
+
+              setStatus("QR code sent to the attendance window. You may return to that window.");
+            } else {
+              setStatus("QR code read: " + scannedId +
+                ". No attendance window was detected. Return to your attendance system and try again.");
+              scanned = false;
+            }
+
+            startBtn.disabled = false;
+          },
+          function () {
+            // Ignore ordinary frame-by-frame scan misses.
+          }
+        );
+
+        setStatus("Camera is running. Point it at a QR code.");
+      } catch (error) {
+        console.error("Camera error:", error);
+        scanner = null;
+        setStatus("Could not start camera: " +
+          (error.message || error) +
+          ". Check browser camera permission and try again.");
+      } finally {
+        starting = false;
+        startBtn.disabled = false;
+      }
+    });
+
+    stopBtn.addEventListener("click", async function () {
+      await stopScanner();
+      setStatus("Camera stopped.");
+      startBtn.disabled = false;
+    });
+
+    window.addEventListener("beforeunload", function () {
+      if (scanner && scanner.isScanning) {
+        scanner.stop().catch(function () {});
+      }
+    });
+  </script>
+</body>
+</html>
